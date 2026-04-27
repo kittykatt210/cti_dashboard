@@ -139,98 +139,377 @@ k3.metric("Critical Incidents", f"{(filtered[risk_level_col] == 'Critical').sum(
 k4.metric("Total Financial Loss", f"${filtered[loss_col].sum():,.0f}" if loss_col else "N/A")
 k5.metric("Compromised Records", f"{filtered[records_col].sum():,.0f}" if records_col else "N/A")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Executive Overview", "Threat Drilldown", "KEV Intelligence", "Model Explainability"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📈 Threat Trends",
+    "🔥 Threat Heatmap",
+    "🎯 Risk Analysis",
+    "🤖 Classification Results",
+    "💰 Regression Results",
+    "🔎 Data Explorer"
+])
 
 with tab1:
-    c1, c2 = st.columns(2)
-    risk_counts = filtered[risk_level_col].value_counts().reset_index()
-    risk_counts.columns = ["risk_level", "count"]
-    c1.plotly_chart(px.bar(risk_counts, x="risk_level", y="count", title="Incident Count by Risk Level"), use_container_width=True)
+    st.subheader("Threat Volume Over Time")
 
-    if loss_col:
-        loss_by_risk = filtered.groupby(risk_level_col, as_index=False)[loss_col].sum()
-        c2.plotly_chart(px.bar(loss_by_risk, x=risk_level_col, y=loss_col, title="Total Financial Loss by Risk Level"), use_container_width=True)
+    if date_col in filtered.columns and risk_level_col in filtered.columns:
+        trend = (
+            filtered
+            .dropna(subset=[date_col])
+            .groupby(
+                [
+                    pd.Grouper(key=date_col, freq=time_freq),
+                    risk_level_col
+                ],
+                observed=False
+            )
+            .size()
+            .reset_index(name="count")
+        )
 
-    c3, c4 = st.columns(2)
-    if loss_col:
-        hover_cols = [c for c in [incident_id, attack_col, data_type_col, downtime_col] if c]
-        c3.plotly_chart(px.scatter(filtered, x=risk_score_col, y=loss_col, color=risk_level_col,
-                                   size=records_col if records_col else None,
-                                   hover_data=hover_cols,
-                                   title="CTI Risk Score vs. Financial Loss"), use_container_width=True)
+        if not trend.empty:
+            fig_trend = px.line(
+                trend,
+                x=date_col,
+                y="count",
+                color=risk_level_col,
+                markers=True,
+                title=f"Threat Volume Over Time by Risk Level ({time_granularity})"
+            )
 
-    if date_col and filtered[date_col].notna().any():
-        trend = filtered.dropna(subset=[date_col]).groupby([pd.Grouper(key=date_col, freq="ME"), risk_level_col]).size().reset_index(name="count")
-        c4.plotly_chart(px.line(trend, x=date_col, y="count", color=risk_level_col, title="Incident Trend Over Time"), use_container_width=True)
+            fig_trend.update_layout(
+                xaxis_title="Date",
+                yaxis_title="Number of Incidents",
+                legend_title="Risk Level",
+                hovermode="x unified"
+            )
 
-with tab2:
-    c1, c2 = st.columns(2)
-    if attack_col:
-        attack_counts = filtered.groupby([attack_col, risk_level_col]).size().reset_index(name="count")
-        c1.plotly_chart(px.bar(attack_counts, y=attack_col, x="count", color=risk_level_col, orientation="h", title="Top Attack Vectors by Risk Level"), use_container_width=True)
-
-    if attack_col and downtime_col:
-        downtime = filtered.groupby([attack_col, risk_level_col], as_index=False)[downtime_col].mean()
-        c2.plotly_chart(px.bar(downtime, x=attack_col, y=downtime_col, color=risk_level_col, title="Average Downtime by Attack Vector"), use_container_width=True)
-
-    if data_type_col and records_col:
-        data_records = filtered.groupby([data_type_col, risk_level_col], as_index=False)[records_col].sum()
-        st.plotly_chart(px.treemap(data_records, path=[risk_level_col, data_type_col], values=records_col, title="Compromised Records by Data Type"), use_container_width=True)
-
-    st.subheader("Incident Drilldown")
-    cols = [c for c in [incident_id, date_col, risk_level_col, risk_score_col, attack_col, data_type_col, records_col, downtime_col, loss_col, "kev_exposure"] if c and c in filtered.columns]
-    st.dataframe(filtered[cols], use_container_width=True)
-
-with tab3:
-    if kev.empty:
-        st.info("Upload the KEV dataset to populate this page.")
-    else:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("KEV Records", f"{len(kev):,}")
-        c2.metric("KEV-Linked Incidents", f"{filtered['kev_exposure'].sum():,.0f}")
-        c3.metric("Avg Risk for KEV Incidents", f"{filtered.loc[filtered['kev_exposure'] == 1, risk_score_col].mean():.3f}" if filtered["kev_exposure"].sum() > 0 else "N/A")
-        c4.metric("Total Loss for KEV Incidents", f"${filtered.loc[filtered['kev_exposure'] == 1, loss_col].sum():,.0f}" if loss_col else "N/A")
-
-        vendor_col = first_existing(kev, ["vendorProject", "vendor_project", "vendor", "Vendor"])
-        ransomware_col = first_existing(kev, ["knownRansomwareCampaignUse", "known_ransomware_campaign_use"])
-        c1, c2 = st.columns(2)
-        if vendor_col:
-            vendor_counts = kev[vendor_col].value_counts().head(15).reset_index()
-            vendor_counts.columns = ["vendor", "count"]
-            c1.plotly_chart(px.bar(vendor_counts, y="vendor", x="count", orientation="h", title="Top KEV Vendors / Projects"), use_container_width=True)
-        if ransomware_col:
-            rw_counts = kev[ransomware_col].value_counts().reset_index()
-            rw_counts.columns = ["known_ransomware_campaign_use", "count"]
-            c2.plotly_chart(px.pie(rw_counts, names="known_ransomware_campaign_use", values="count", title="Known Ransomware Campaign Use"), use_container_width=True)
-        st.subheader("KEV Detail Table")
-        st.dataframe(kev, use_container_width=True)
-
-with tab4:
-    st.subheader("Model Performance Comparison")
-    perf = pd.DataFrame({
-        "Model": ["Decision Tree", "Logistic Regression", "Random Forest"],
-        "Accuracy": [0.9718, 0.5493, 0.8404],
-        "Precision": [0.9720, 0.5475, 0.8433],
-        "Recall": [0.9718, 0.5493, 0.8404],
-        "F1 Score": [0.9716, 0.5482, 0.8365]
-    })
-    perf_long = perf.melt(id_vars="Model", var_name="Metric", value_name="Score")
-    st.plotly_chart(px.bar(perf_long, x="Model", y="Score", color="Metric", barmode="group", title="Classification Model Evaluation"), use_container_width=True)
-    st.dataframe(perf, use_container_width=True)
-
-    st.info("Recommended model: Random Forest. Although the Decision Tree achieved the highest accuracy, its importance was dominated by a small number of variables, suggesting possible overfitting. Random Forest provides a stronger balance between predictive performance and generalizability.")
-
-    if uploaded_importance is not None:
-        importance = pd.read_csv(uploaded_importance)
-        feature_col = first_existing(importance, ["feature", "Feature"])
-        importance_col = first_existing(importance, ["importance", "Importance"])
-        if feature_col and importance_col:
-            top_imp = importance.sort_values(importance_col, ascending=False).head(15)
-            st.plotly_chart(px.bar(top_imp, y=feature_col, x=importance_col, orientation="h", title="Top Feature Importances"), use_container_width=True)
-            st.dataframe(top_imp, use_container_width=True)
+            st.plotly_chart(fig_trend, use_container_width=True)
         else:
-            st.warning("feature_importance.csv must contain columns named feature and importance.")
+            st.warning("No trend data available for the selected filters.")
     else:
-        st.write("Upload feature_importance.csv to display the feature importance chart.")
+        st.warning("Date and risk level columns are required for this chart.")
 
-st.sidebar.download_button("Download Filtered Dashboard Data", filtered.to_csv(index=False), "filtered_cti_dashboard_data.csv", "text/csv")
+    st.divider()
+
+    st.subheader("Top Attack Types")
+
+    if attack_type_col in filtered.columns:
+        attack_counts = (
+            filtered[attack_type_col]
+            .value_counts()
+            .reset_index()
+        )
+        attack_counts.columns = [attack_type_col, "count"]
+
+        fig_attack = px.bar(
+            attack_counts.head(10),
+            x="count",
+            y=attack_type_col,
+            orientation="h",
+            title="Top 10 Attack Types"
+        )
+
+        fig_attack.update_layout(
+            xaxis_title="Number of Incidents",
+            yaxis_title="Attack Type",
+            yaxis={"categoryorder": "total ascending"}
+        )
+
+        st.plotly_chart(fig_attack, use_container_width=True)
+
+
+# ============================================================
+# TAB 2: Threat Heatmap
+# ============================================================
+with tab2:
+    st.subheader("Threat Heatmap")
+
+    heatmap_x = st.selectbox(
+        "Heatmap X-Axis",
+        [col for col in [attack_type_col, industry_col, country_col] if col in filtered.columns],
+        index=0
+    )
+
+    heatmap_y = st.selectbox(
+        "Heatmap Y-Axis",
+        [col for col in [risk_level_col, industry_col, country_col] if col in filtered.columns],
+        index=0
+    )
+
+    if heatmap_x != heatmap_y:
+        heatmap_data = (
+            filtered
+            .groupby([heatmap_y, heatmap_x], observed=False)
+            .size()
+            .reset_index(name="count")
+        )
+
+        heatmap_pivot = heatmap_data.pivot(
+            index=heatmap_y,
+            columns=heatmap_x,
+            values="count"
+        ).fillna(0)
+
+        fig_heatmap = px.imshow(
+            heatmap_pivot,
+            text_auto=True,
+            aspect="auto",
+            title=f"Threat Concentration: {heatmap_y} by {heatmap_x}"
+        )
+
+        fig_heatmap.update_layout(
+            xaxis_title=heatmap_x,
+            yaxis_title=heatmap_y
+        )
+
+        st.plotly_chart(fig_heatmap, use_container_width=True)
+    else:
+        st.warning("Choose two different variables for the heatmap.")
+
+
+# ============================================================
+# TAB 3: Risk Analysis
+# ============================================================
+with tab3:
+    st.subheader("Risk Distribution")
+
+    if risk_level_col in filtered.columns:
+        risk_counts = (
+            filtered[risk_level_col]
+            .value_counts()
+            .reset_index()
+        )
+        risk_counts.columns = [risk_level_col, "count"]
+
+        fig_risk = px.pie(
+            risk_counts,
+            names=risk_level_col,
+            values="count",
+            title="Risk Level Distribution",
+            hole=0.45
+        )
+
+        st.plotly_chart(fig_risk, use_container_width=True)
+
+    st.divider()
+
+    st.subheader("Risk by Attack Type")
+
+    if risk_level_col in filtered.columns and attack_type_col in filtered.columns:
+        risk_attack = (
+            filtered
+            .groupby([attack_type_col, risk_level_col], observed=False)
+            .size()
+            .reset_index(name="count")
+        )
+
+        fig_risk_attack = px.bar(
+            risk_attack,
+            x=attack_type_col,
+            y="count",
+            color=risk_level_col,
+            title="Risk Level by Attack Type",
+            barmode="stack"
+        )
+
+        fig_risk_attack.update_layout(
+            xaxis_title="Attack Type",
+            yaxis_title="Number of Incidents",
+            legend_title="Risk Level"
+        )
+
+        st.plotly_chart(fig_risk_attack, use_container_width=True)
+
+
+# ============================================================
+# TAB 4: Model Results
+# ============================================================
+with tab4:
+    st.subheader("Classification Model Summary")
+
+    st.markdown("""
+    This section is designed for the classification portion of the artifact.
+    The dashboard can be used to present model results such as accuracy, precision,
+    recall, F1-score, and confusion matrix values.
+    """)
+
+    model_results = pd.DataFrame({
+        "Model": ["Decision Tree", "Logistic Regression", "Random Forest"],
+        "Accuracy": [0.84, 0.79, 0.87],
+        "Precision": [0.82, 0.77, 0.86],
+        "Recall": [0.81, 0.75, 0.85],
+        "F1-Score": [0.815, 0.760, 0.855]
+    })
+
+    st.dataframe(model_results, use_container_width=True)
+
+    fig_model = px.bar(
+        model_results,
+        x="Model",
+        y=["Accuracy", "Precision", "Recall", "F1-Score"],
+        barmode="group",
+        title="Classification Model Evaluation"
+    )
+
+    fig_model.update_layout(
+        yaxis_title="Score",
+        xaxis_title="Model",
+        legend_title="Metric"
+    )
+
+    st.plotly_chart(fig_model, use_container_width=True)
+
+    st.info(
+        "Replace the sample model scores above with the actual evaluation results "
+        "from your trained classification models."
+    )
+
+# ============================================================
+# TAB 5: Regression Results
+# ============================================================
+with tab5:
+    st.subheader("Regression Model Results")
+
+    st.markdown("""
+    This section compares the performance of the Linear Regression and Random Forest Regression models.
+    The regression models predict estimated financial loss from incident, financial, market, and KEV-related features.
+    """)
+
+    try:
+        regression_metrics = pd.read_csv("regression_model_metrics.csv")
+
+        st.dataframe(regression_metrics, use_container_width=True)
+
+        fig_reg_metrics = px.bar(
+            regression_metrics,
+            x="Model",
+            y=["R2", "MAE", "RMSE"],
+            barmode="group",
+            title="Regression Model Evaluation Metrics"
+        )
+
+        fig_reg_metrics.update_layout(
+            xaxis_title="Model",
+            yaxis_title="Metric Value",
+            legend_title="Metric"
+        )
+
+        st.plotly_chart(fig_reg_metrics, use_container_width=True)
+
+    except FileNotFoundError:
+        st.warning("regression_model_metrics.csv was not found. Run the regression script first.")
+
+    st.divider()
+
+    st.subheader("Actual vs Predicted Financial Loss")
+
+    try:
+        regression_predictions = pd.read_csv("regression_model_predictions.csv")
+
+        if {
+            "total_loss_usd",
+            "predicted_total_loss_usd"
+        }.issubset(regression_predictions.columns):
+
+            fig_actual_pred = px.scatter(
+                regression_predictions,
+                x="total_loss_usd",
+                y="predicted_total_loss_usd",
+                title="Actual vs Predicted Total Loss",
+                labels={
+                    "total_loss_usd": "Actual Total Loss USD",
+                    "predicted_total_loss_usd": "Predicted Total Loss USD"
+                },
+                hover_data=[
+                    col for col in [
+                        "incident_id",
+                        "attack_vector_primary",
+                        "data_type",
+                        "systems_affected",
+                        "downtime_hours"
+                    ]
+                    if col in regression_predictions.columns
+                ]
+            )
+
+            fig_actual_pred.add_shape(
+                type="line",
+                x0=regression_predictions["total_loss_usd"].min(),
+                y0=regression_predictions["total_loss_usd"].min(),
+                x1=regression_predictions["total_loss_usd"].max(),
+                y1=regression_predictions["total_loss_usd"].max(),
+                line=dict(dash="dash")
+            )
+
+            st.plotly_chart(fig_actual_pred, use_container_width=True)
+
+        else:
+            st.warning("Prediction file must contain total_loss_usd and predicted_total_loss_usd.")
+
+    except FileNotFoundError:
+        st.warning("regression_model_predictions.csv was not found. Run the regression script first.")
+
+    st.divider()
+
+    st.subheader("Prediction Error Analysis")
+
+    try:
+        regression_predictions = pd.read_csv("regression_model_predictions.csv")
+
+        if "prediction_error_usd" in regression_predictions.columns:
+            fig_error = px.histogram(
+                regression_predictions,
+                x="prediction_error_usd",
+                nbins=30,
+                title="Distribution of Prediction Errors"
+            )
+
+            fig_error.update_layout(
+                xaxis_title="Prediction Error USD",
+                yaxis_title="Number of Incidents"
+            )
+
+            st.plotly_chart(fig_error, use_container_width=True)
+
+            st.dataframe(
+                regression_predictions[
+                    [
+                        col for col in [
+                            "incident_id",
+                            "total_loss_usd",
+                            "predicted_total_loss_usd",
+                            "prediction_error_usd",
+                            "attack_vector_primary",
+                            "data_type"
+                        ]
+                        if col in regression_predictions.columns
+                    ]
+                ].sort_values(
+                    by="prediction_error_usd",
+                    key=lambda x: abs(x),
+                    ascending=False
+                ).head(10),
+                use_container_width=True
+            )
+
+    except FileNotFoundError:
+        st.warning("regression_model_predictions.csv was not found. Run the regression script first.")
+        
+# ============================================================
+# TAB 6: Data Explorer
+# ============================================================
+with tab6:
+    st.subheader("Filtered Dataset")
+
+    st.write(f"Showing **{len(filtered):,}** records after filters.")
+
+    st.dataframe(filtered, use_container_width=True)
+
+    csv = filtered.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="Download Filtered Data as CSV",
+        data=csv,
+        file_name="filtered_cti_data.csv",
+        mime="text/csv"
+    )
