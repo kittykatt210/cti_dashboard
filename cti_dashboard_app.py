@@ -41,6 +41,8 @@ with st.sidebar:
     uploaded_financial = st.file_uploader("financial_impact.csv", type="csv")
     uploaded_market = st.file_uploader("market_impact.csv", type="csv")
     uploaded_kev = st.file_uploader("known_exploited_vulnerabilities.csv", type="csv")
+    uploaded_reg_model_metrics = st.file_uploader("regression_model_metrics.csv", type="csv")
+    uploaded_reg_model_predictions = st.file_uploader("regression_model_predictions.csv", type="csv")
     uploaded_importance = st.file_uploader("Optional: feature_importance.csv", type="csv")
 
 if uploaded_incidents is None:
