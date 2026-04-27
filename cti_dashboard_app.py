@@ -31,6 +31,23 @@ def make_risk_level(score):
     except Exception:
         return pd.cut(score, bins=[-np.inf, .25, .5, .75, np.inf], labels=["Low", "Medium", "High", "Critical"])
 
+def get_time_frequency(label):
+    mapping = {
+        "Monthly": "MS",
+        "Weekly": "W-MON",
+        "Quarterly": "QS"
+    }
+    return mapping.get(label, "MS")
+
+
+time_granularity = st.sidebar.selectbox(
+    "Time Granularity",
+    ["Monthly", "Weekly", "Quarterly"],
+    index=0
+)
+
+time_freq = get_time_frequency(time_granularity)
+
 
 st.title("🛡️ Financial Industry CTI Risk Intelligence Dashboard")
 st.caption("Integrated dashboard for cyber incident classification, financial impact, market impact, and KEV vulnerability intelligence.")
