@@ -152,7 +152,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 
 with tab1:
     st.subheader("Threat Volume Over Time")
-
+    pd.Grouper(key=date_col, freq=time_freq)
     if date_col in filtered.columns and risk_level_col in filtered.columns:
         trend = (
             filtered
